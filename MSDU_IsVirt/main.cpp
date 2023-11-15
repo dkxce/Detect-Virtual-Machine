@@ -1,8 +1,8 @@
 //
 // C++ (Win32, Win64)
 // msdu_isvirt
-// v 0.1, 14.11.2023
-// https://github.com/dkxce/Detect-Virtual-Machine/
+// v 0.2, 14.11.2023
+// https://github.com/dkxce/Detect-Virtual-Machine
 // en,ru,1251,utf-8
 //
 
@@ -110,7 +110,7 @@ int main(int argc, char** argv)
         }
     };
 
-    // Step 06.1 --------------------------------------------------
+    // Step 06.1A --------------------------------------------------
     // Win32_ComputerSystem: Manufacturer and Model
     string manufacturer = "";
     string model = "";
@@ -172,6 +172,59 @@ int main(int argc, char** argv)
                 {
                     isVirt = true;
                     detecton = "Win32_ComputerSystem VMWARE";
+                };
+            };
+
+            pEnumerator->Release();
+        };
+    };
+
+    // Step 06.1B --------------------------------------------------
+    // Win32_processor: Manufacturer
+    string processor = "";
+    if (!isVirt)
+    {
+        IEnumWbemClassObject* pEnumerator = NULL;
+        hres = pSvc->ExecQuery(bstr_t("WQL"), bstr_t("SELECT * FROM Win32_processor"), WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &pEnumerator);
+        if (!FAILED(hres))
+        {
+            IWbemClassObject* pclsObj = NULL;
+            ULONG uReturn = 0;
+
+            while (pEnumerator)
+            {
+                HRESULT hr = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
+                if (0 == uReturn) { break; }
+
+                try
+                {
+                    VARIANT vtProp;
+                    VariantInit(&vtProp);
+                    hr = pclsObj->Get(L"Manufacturer", 0, &vtProp, 0, 0);
+                    if (vtProp.bstrVal != NULL)
+                        processor = str_toupper(bstr_to_str(SysAllocString(vtProp.bstrVal)));
+                    VariantClear(&vtProp);
+
+                    pclsObj->Release();
+                }
+                catch (...) {};
+
+                // VBox
+                if (processor.find("VBOXVBOXVBOX") != std::string::npos) {
+                    isVirt = true;
+                    detecton = "Win32_processor VBox";
+                };
+                // VMWare
+                if (processor.find("VMWAREVMWARE") != std::string::npos)
+                {
+                    isVirt = true;
+                    detecton = "Win32_processor VMWARE";
+                };
+                // Hyper-V
+                if (processor.find("PRL HYPERV") != std::string::npos)
+                {
+                    isVirt = true;
+                    detecton = "Win32_processor Hyper-V";
                 };
             };
 
@@ -267,6 +320,7 @@ int main(int argc, char** argv)
     if (!isVirt)
     {
         string disk_model = "";
+        string disk_device = "";
         IEnumWbemClassObject* pEnumerator = NULL;
         hres = pSvc->ExecQuery(bstr_t("WQL"), bstr_t("SELECT * FROM Win32_DiskDrive"), WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &pEnumerator);
         if (!FAILED(hres))
@@ -276,6 +330,9 @@ int main(int argc, char** argv)
 
             while (pEnumerator)
             {
+                disk_model = "";
+                disk_device = "";
+
                 HRESULT hr = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
                 if (0 == uReturn) { break; }
 
@@ -286,6 +343,9 @@ int main(int argc, char** argv)
                     hr = pclsObj->Get(L"Model", 0, &vtProp, 0, 0);
                     if (vtProp.bstrVal != NULL)
                         disk_model = str_toupper(bstr_to_str(SysAllocString(vtProp.bstrVal)));
+                    hr = pclsObj->Get(L"PNPDeviceID", 0, &vtProp, 0, 0);
+                    if (vtProp.bstrVal != NULL)
+                        disk_device = str_toupper(bstr_to_str(SysAllocString(vtProp.bstrVal)));
                     VariantClear(&vtProp);
                     pclsObj->Release();
                 }
@@ -297,8 +357,14 @@ int main(int argc, char** argv)
                     isVirt = true;
                     detecton = "Win32_DiskDrive Hyper-V";
                 };
-                // VMWare
+                // VMWARE / VEN_VMWARE
                 if (disk_model.find("VMWARE") != std::string::npos)
+                {
+                    isVirt = true;
+                    detecton = "Win32_DiskDrive VMWare";
+                };
+                // VMWARE / VEN_VMWARE
+                if (disk_device.find("VEN_VMWARE") != std::string::npos)
                 {
                     isVirt = true;
                     detecton = "Win32_DiskDrive VMWare";
@@ -309,11 +375,17 @@ int main(int argc, char** argv)
                     isVirt = true;
                     detecton = "Win32_DiskDrive QEmu";
                 };
-                // VBox
+                // VBox / VBOX_HARDDISK
                 if (disk_model.find("VBOX") != std::string::npos)
                 {
                     isVirt = true;
                     detecton = "Win32_DiskDrive VBox";
+                };
+                // VBox / VBOX_HARDDISK
+                if (disk_device.find("VBOX_HARDDISK") != std::string::npos)
+                {
+                    isVirt = true;
+                    detecton = "Win32_DiskDrive VBox HDD";
                 };
             };
 
@@ -335,6 +407,8 @@ int main(int argc, char** argv)
 
             while (pEnumerator)
             {
+                pnp_device = "";
+
                 HRESULT hr = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
                 if (0 == uReturn) { break; }
 
@@ -407,6 +481,8 @@ int main(int argc, char** argv)
 
             while (pEnumerator)
             {
+                service = "";
+
                 HRESULT hr = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
                 if (0 == uReturn) { break; }
 
@@ -474,6 +550,7 @@ int main(int argc, char** argv)
     if (isVirt) wcout << "Device is:    " << "Virtual" << endl;
     else wcout << "Device is:    " << "Phisical" << endl;
     wcout << "Detected on:  " << detecton.c_str() << endl;
+    wcout << "Processor:    " << processor.c_str() << endl;
     wcout << "Manufacturer: " << manufacturer.c_str() << endl;
     wcout << "Model:        " << model.c_str() << endl;
     wcout << "BaseBoard:    " << baseboard.c_str() << endl;
